@@ -1,0 +1,37 @@
+name: Refresh HKEXL sitemap
+
+on:
+  repository_dispatch:
+    types: [hkexl_content_changed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hkexl-production-sitemap
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      - name: Generate sitemap and build website
+        run: npm run build
+        env:
+          VITE_WORDPRESS_VERSION: 'true'
+          VITE_WP_API_URL: https://palegoldenrod-finch-836401.hostingersite.com/wp-json/wp/v2
+          VITE_WP_DORM_CATEGORY_ID: '2'
+      - name: Publish to Firebase Hosting
+        uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_HKEXL_990B9 }}
+          channelId: live
+          projectId: hkexl-990b9
