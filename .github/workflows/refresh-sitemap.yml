@@ -1,8 +1,11 @@
 name: Refresh HKEXL sitemap
 
 on:
+  # Sent by the HKEXL Sitemap Webhook WordPress plugin when a published post changes.
   repository_dispatch:
     types: [hkexl_content_changed]
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:

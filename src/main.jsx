@@ -30,15 +30,17 @@ import DOMPurify from 'dompurify';
 import localAssets from './local-assets.json';
 import './styles.css';
 
-const A = '/assets/webp/';
+// The WordPress theme build sets HKEXL_CONFIG; the Firebase build leaves it undefined.
+const runtimeConfig = window.HKEXL_CONFIG || {};
+const A = `${import.meta.env.BASE_URL}assets/webp/`;
 const U = 'https://hkexl.com/wp-content/uploads/';
 const wordpressEnabled = import.meta.env.VITE_WORDPRESS_VERSION === 'true';
-const wordpressApiUrl = import.meta.env.VITE_WP_API_URL || 'https://palegoldenrod-finch-836401.hostingersite.com/wp-json/wp/v2';
+const wordpressApiUrl = runtimeConfig.apiUrl || import.meta.env.VITE_WP_API_URL || 'https://palegoldenrod-finch-836401.hostingersite.com/wp-json/wp/v2';
 const wordpressOrigin = new URL(wordpressApiUrl).origin;
 const wordpressHost = new URL(wordpressOrigin).host;
 const customCmsEnabled = wordpressEnabled && !wordpressApiUrl.includes('public-api.wordpress.com');
 const dormCategorySlug = 'dormitories';
-const wordpressDormCategoryId = Number(import.meta.env.VITE_WP_DORM_CATEGORY_ID) || null;
+const wordpressDormCategoryId = runtimeConfig.apiUrl ? null : Number(import.meta.env.VITE_WP_DORM_CATEGORY_ID) || null;
 const dormPostFields = 'id,slug,title,excerpt,content,featured_media';
 const CmsSettingsContext = createContext(null);
 const phoneHref = 'tel:+85261426141';
@@ -251,6 +253,15 @@ function imageSrc(src = '') {
     if (local) return `${A}${encodeURIComponent(local)}`;
   }
   return src;
+}
+
+/** Decode a percent-encoded path, leaving malformed input unchanged. */
+function safeDecodeUri(path) {
+  try {
+    return decodeURI(path);
+  } catch {
+    return path;
+  }
 }
 
 /** Normalize a path to its pathname with no trailing slash. */
@@ -662,10 +673,13 @@ function Seo({ title, description, image, robots, type = 'website', twitterCard 
       || description
       || cmsConfig?.seo?.defaultDescription
       || '香港特快外勞提供香港外勞申請、招聘、簽證代辦、宿舍安排及續約支援。';
-    const canonical = `${window.location.origin}${normalizePath(window.location.pathname)}`;
-    const robotsValue = robots
-      ? [robots.index, robots.follow, robots['max-snippet'], robots['max-image-preview'], robots['max-video-preview']].filter(Boolean).join(', ')
-      : 'index, follow';
+    // Same encoding as the sitemap and the static HTML, whichever form the visitor arrived with.
+    const canonical = `${runtimeConfig.canonicalOrigin || window.location.origin}${encodeURI(safeDecodeUri(normalizePath(window.location.pathname)))}`;
+    const robotsValue = runtimeConfig.noindex
+      ? 'noindex, nofollow'
+      : robots
+        ? [robots.index, robots.follow, robots['max-snippet'], robots['max-image-preview'], robots['max-video-preview']].filter(Boolean).join(', ')
+        : 'index, follow';
     document.title = safeTitle;
     setCanonical(canonical);
     setMeta('meta[name="description"]', 'name', 'description', safeDescription);
