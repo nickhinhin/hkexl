@@ -17,6 +17,9 @@ const oldCollections = [
 ];
 const navLinks = Object.entries(titles).map(([path, title]) => `<a href="${path}">${escape(title)}</a>`).join(' ');
 const metadata = new Map();
+// Build-time copies of the /info and /dorms lists, in the order React requests them.
+const articleList = [];
+const dormList = [];
 const redirects = [];
 
 /** Build initial HTML metadata and permanent redirects for the published routes. */
@@ -26,14 +29,29 @@ async function generateRoutes() {
   if (config.VITE_WORDPRESS_VERSION === 'true') {
     let page = 1;
     while (true) {
-      const url = `${config.VITE_WP_API_URL}/posts?status=publish&per_page=100&page=${page}&_fields=slug,title,excerpt,content,categories`;
+      const url = `${config.VITE_WP_API_URL}/posts?status=publish&per_page=100&page=${page}&_embed=wp:featuredmedia`;
       const response = await fetch(url, {signal: AbortSignal.timeout(15000)});
       if (!response.ok) throw new Error(`Route metadata request failed: ${response.status}`);
       for (const post of await response.json()) {
         const slug = decodeURIComponent(post.slug);
         const dorm = post.categories.includes(Number(config.VITE_WP_DORM_CATEGORY_ID));
         const path = `/${dorm ? 'living' : 'posts'}/${slug}`;
-        metadata.set(path, {title: plain(post.title.rendered), description: plain(post.excerpt.rendered).slice(0, 180), content: staticContent(post.content.rendered)});
+        const media = post._embedded?.['wp:featuredmedia']?.[0];
+        const record = {
+          id: post.id, slug: post.slug, date: post.date, title: post.title, excerpt: post.excerpt, content: post.content,
+          featured_media: post.featured_media, yoast_head_json: post.yoast_head_json, hkexl_seo: post.hkexl_seo,
+          hkexl_featured_image: media?.media_details?.sizes?.medium_large?.source_url || media?.source_url || '',
+        };
+        metadata.set(path, {
+          title: plain(post.title.rendered),
+          description: plain(post.excerpt.rendered).slice(0, 180),
+          content: staticContent(post.content.rendered),
+          initial: {kind: dorm ? 'dorm' : 'post', post: record},
+        });
+        // List cards only need the title, excerpt, image and (for dorm fields) content.
+        const {yoast_head_json, hkexl_seo, ...card} = record;
+        if (dorm) dormList.push(card);
+        else articleList.push({...card, content: {rendered: ''}});
         if (!dorm) {
           redirects.push({source:`/${slug}`,destination:encodeURI(path),type:301});
           redirects.push({source:`/${slug}/`,destination:encodeURI(path),type:301});
@@ -48,15 +66,22 @@ async function generateRoutes() {
   }
   redirects.push(...oldCollections);
   const template = await readFile('dist/index.html', 'utf8');
+  const byDate = (a, b) => a.date.localeCompare(b.date);
+  const lists = {
+    '/info': {kind: 'posts', posts: [...articleList].sort(byDate).reverse().slice(0, 12)},
+    '/dorms': {kind: 'dorms', posts: [...dormList].sort(byDate)},
+  };
   for (const path of paths) {
-    const data = metadata.get(path) || {title:titles[path],description:'香港特快外勞提供香港外勞申請、招聘、簽證及住宿安排服務。'};
+    const data = metadata.get(path) || {title:titles[path],description:'香港特快外勞提供香港外勞申請、招聘、簽證及住宿安排服務。',initial:lists[path]};
     const title = `${data.title}｜香港特快外勞`;
     const canonical = origin + encodeURI(path);
     const html = template.replace(/<title>.*?<\/title>/s, `<title>${escape(title)}</title>`)
       .replace(/<meta name="description"[^>]*>/, `<meta name="description" content="${escape(data.description)}">`)
       .replace('</head>', `<link rel="canonical" href="${escape(canonical)}"><meta name="robots" content="index, follow"></head>`)
       // React replaces this on load; crawlers get the page text without running JavaScript.
-      .replace('<div id="root"></div>', `<div id="root"><nav>${navLinks}</nav><main><h1>${escape(data.title)}</h1>${data.content || `<p>${escape(data.description)}</p>`}</main></div>`);
+      .replace('<div id="root"></div>', `<div id="root"><nav>${navLinks}</nav><main><h1>${escape(data.title)}</h1>${data.content || `<p>${escape(data.description)}</p>`}</main></div>`
+        // React shows this copy when the CMS API is unreachable, as it is for Googlebot on the Hostinger temp domain.
+        + (data.initial ? `<script id="hkexl-initial" type="application/json">${JSON.stringify(data.initial).replace(/</g, '\\u003c')}</script>` : ''));
     const file = path === '/' ? 'dist/index.html' : join('dist', `${path.slice(1)}.html`);
     await mkdir(dirname(file), {recursive:true});
     await writeFile(file, html);

@@ -290,6 +290,8 @@ function cleanSeoTemplate(value = '', postTitle = '') {
     .replaceAll('%%sitedesc%%', '外勞申請、招聘、簽證及宿舍安排')
     .replaceAll('%%page%%', '')
     .replaceAll('%%sep%%', '-')
+    // Yoast fills the site name from WordPress, which is still the temporary hosting domain.
+    .replace(/[a-z0-9-]+\.hostingersite\.com/gi, '香港特快外勞')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -507,8 +509,30 @@ async function fetchDormCategory(signal) {
 }
 
 /** Resolve the dormitory category and load every published page of its posts. */
+/** Build-time copy of this route's WordPress record, embedded by generate-route-pages.mjs. */
+const initialRecord = (() => {
+  try {
+    return JSON.parse(document.getElementById('hkexl-initial')?.textContent || 'null');
+  } catch {
+    return null;
+  }
+})();
+
+/** Return the embedded record when it belongs to this route; Googlebot cannot reach the CMS API. */
+function initialPost(kind, slug) {
+  if (!initialRecord || initialRecord.kind !== kind) return null;
+  const same = (value) => { try { return decodeURIComponent(value); } catch { return value; } };
+  return same(initialRecord.post.slug) === same(slug) ? initialRecord.post : null;
+}
+
+/** Return the embedded list for /info or /dorms, if this page has one. */
+function initialList(kind) {
+  return initialRecord?.kind === kind ? initialRecord.posts : null;
+}
+
 function useWordPressCategoryPosts(categorySlug) {
-  const [state, setState] = useState({ posts: [], categoryId: null, loading: wordpressEnabled, error: '' });
+  const initial = categorySlug === dormCategorySlug ? initialList('dorms') : null;
+  const [state, setState] = useState({ posts: initial || [], categoryId: null, loading: wordpressEnabled && !initial, error: '' });
 
   useEffect(() => {
     if (!wordpressEnabled) return;
@@ -534,7 +558,7 @@ function useWordPressCategoryPosts(categorySlug) {
         const posts = await withDormitoryMedia([...await firstResponse.json(), ...remainingPages.flat()], controller.signal);
         if (!controller.signal.aborted) setState({ posts, categoryId: category.id, loading: false, error: '' });
       } catch (error) {
-        if (!controller.signal.aborted) setState({ posts: [], categoryId: null, loading: false, error: error.message });
+        if (!controller.signal.aborted) setState((previous) => (previous.posts.length ? { ...previous, loading: false } : { posts: [], categoryId: null, loading: false, error: error.message }));
       }
     };
     refresh();
@@ -548,11 +572,12 @@ function useWordPressCategoryPosts(categorySlug) {
 
 /** Fetch only the requested WordPress dormitory instead of downloading the complete directory. */
 function useWordPressDormPost(slug) {
-  const [state, setState] = useState({ post: null, loading: wordpressEnabled, error: '' });
+  const initial = initialPost('dorm', slug);
+  const [state, setState] = useState({ post: initial, loading: wordpressEnabled && !initial, error: '' });
   useEffect(() => {
     if (!wordpressEnabled) return;
     const controller = new AbortController();
-    setState({ post: null, loading: true, error: '' });
+    setState({ post: initial, loading: !initial, error: '' });
     const refresh = async () => {
       try {
         const category = await fetchDormCategory(controller.signal);
@@ -565,7 +590,8 @@ function useWordPressDormPost(slug) {
         const posts = await withDormitoryMedia(await response.json(), controller.signal);
         if (!controller.signal.aborted) setState({ post: posts[0] || null, loading: false, error: '' });
       } catch (error) {
-        if (!controller.signal.aborted) setState({ post: null, loading: false, error: error.message });
+        // Keep the build-time copy instead of replacing real content with an error.
+        if (!controller.signal.aborted) setState({ post: initial, loading: false, error: initial ? '' : error.message });
       }
     };
     refresh();
@@ -599,11 +625,13 @@ function uniqueWorkers(workersList) {
 
 /** Read a published article page; refresh on focus and once per minute. */
 function useWordPressPosts(page = 1) {
-  const [state, setState] = useState({ posts: [], loading: wordpressEnabled, error: '', totalPages: 1 });
+  const raw = page === 1 ? initialList('posts') : null;
+  const initial = raw ? raw.map(normalizeWpPost) : null;
+  const [state, setState] = useState({ posts: initial || [], loading: wordpressEnabled && !initial, error: '', totalPages: 1 });
   useEffect(() => {
     if (!wordpressEnabled) return;
     const controller = new AbortController();
-    setState({ posts: [], loading: true, error: '', totalPages: 1 });
+    setState({ posts: initial || [], loading: !initial, error: '', totalPages: 1 });
     const refresh = async () => {
       try {
         const dormCategory = await fetchDormCategory(controller.signal);
@@ -613,7 +641,7 @@ function useWordPressPosts(page = 1) {
         const posts = await response.json();
         if (!controller.signal.aborted) setState({ posts: posts.map(normalizeWpPost), loading: false, error: '', totalPages: Number(response.headers.get('X-WP-TotalPages')) || 1 });
       } catch (error) {
-        if (!controller.signal.aborted) setState((previous) => ({ ...previous, loading: false, error: error.message }));
+        if (!controller.signal.aborted) setState((previous) => ({ ...previous, loading: false, error: previous.posts.length ? '' : error.message }));
       }
     };
     refresh();
@@ -626,17 +654,19 @@ function useWordPressPosts(page = 1) {
 
 /** Fetch one published post by its decoded URL slug; never substitute another article. */
 function useWordPressPost(slug) {
-  const [state, setState] = useState({ post: null, loading: wordpressEnabled, error: '' });
+  const raw = initialPost('post', slug);
+  const initial = raw ? normalizeWpPost(raw) : null;
+  const [state, setState] = useState({ post: initial, loading: wordpressEnabled && !initial, error: '' });
   useEffect(() => {
     if (!wordpressEnabled) return;
     const controller = new AbortController();
-    setState({ post: null, loading: true, error: '' });
+    setState({ post: initial, loading: !initial, error: '' });
     let decodedSlug = slug;
     try { decodedSlug = decodeURIComponent(slug); } catch { /* Preserve malformed slugs for a normal not-found response. */ }
     fetch(wpEndpoint('/posts', `status=publish&_embed=1&slug=${encodeURIComponent(decodedSlug)}`), { signal: controller.signal, cache: 'no-store' })
       .then((response) => { if (!response.ok) throw new Error(`WordPress API ${response.status}`); return response.json(); })
       .then((posts) => { if (!controller.signal.aborted) setState({ post: posts[0] ? normalizeWpPost(posts[0]) : null, loading: false, error: '' }); })
-      .catch((error) => { if (!controller.signal.aborted) setState({ post: null, loading: false, error: error.message }); });
+      .catch((error) => { if (!controller.signal.aborted) setState({ post: initial, loading: false, error: initial ? '' : error.message }); });
     return () => controller.abort();
   }, [slug]);
   return state;
