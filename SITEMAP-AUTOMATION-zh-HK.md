@@ -4,7 +4,8 @@
 
 1. WordPress 發佈、修改、下架或永久刪除文章／宿舍文章時，`HKEXL Sitemap Webhook` 外掛通知 GitHub。
 2. `.github/workflows/refresh-sitemap.yml` 執行 `npm ci`、`npm run build`，由 `scripts/generate-sitemap.mjs` 讀取已發佈的 WordPress 文章並產生正式網域網址。
-3. GitHub Actions 將整個現有網站建置結果部署到 Firebase Hosting，`https://hkexl.com/sitemap.xml` 因而更新。
+3. GitHub Actions 將整個現有網站建置結果部署到 Firebase Hosting，`https://hkexl.com/sitemap.xml` 及預先產生嘅文章／宿舍頁面因而更新。
+4. 後備檢查：工作流程每 3 小時（第 17 分鐘）比較 WordPress 已發佈文章數量及最新修改時間，同 `https://hkexl.com/wp-sync.json` 記錄嘅上次部署版本。有分別先會重新部署，冇分別就跳過。即使 webhook 失敗，最遲約 3 小時內都會自動補回。
 
 只在 WordPress 後台改字或圖片，網站本身會直接讀取最新內容；上述部署只係為咗更新 sitemap。Google Search Console 成功提交 sitemap 一次後會定期重讀。
 
@@ -18,7 +19,8 @@
 ## 檢查
 
 - WordPress 設定頁的 `Last dispatch` 應顯示 `204`。
-- GitHub Actions 的「Refresh HKEXL sitemap」工作應成功。
+- GitHub Actions 的「Deploy HKEXL from WordPress」工作應成功。
+- `https://hkexl.com/wp-sync.json` 的 `version`（格式：文章數量:文章ID@修改時間）應等於 WordPress 最新狀態。
 - `https://hkexl.com/sitemap.xml` 應列出新的／更新後的文章網址；下架文章應消失。
 
 WordPress 前台被全站設為 `noindex`，但正式 React 網站使用本身的索引設定。外掛公開 `hkexl_sitemap_index` 欄位，讓文章在 Yoast 明確設為 `noindex` 時仍不加入 sitemap。

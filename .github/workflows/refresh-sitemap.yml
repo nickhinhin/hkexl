@@ -1,9 +1,12 @@
-name: Refresh HKEXL sitemap
+name: Deploy HKEXL from WordPress
 
 on:
-  # Sent by the HKEXL Sitemap Webhook WordPress plugin when a published post changes.
+  # Sent instantly by the HKEXL Sitemap Webhook WordPress plugin when a published post changes.
   repository_dispatch:
     types: [hkexl_content_changed]
+  # Safety net: check every 3 hours and deploy only if WordPress changed since the last deploy.
+  schedule:
+    - cron: '17 */3 * * *'
   push:
     branches: [main]
   workflow_dispatch:
@@ -15,23 +18,51 @@ concurrency:
   group: hkexl-production-sitemap
   cancel-in-progress: false
 
+env:
+  WP_API: https://palegoldenrod-finch-836401.hostingersite.com/wp-json/wp/v2
+  LIVE_SITE: https://hkexl.com
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Read WordPress content version
+        id: wp
+        run: |
+          headers=$(mktemp)
+          body=$(curl -sfS -A 'HKEXL-Deploy' -D "$headers" "$WP_API/posts?status=publish&per_page=1&orderby=modified&order=desc&_fields=id,modified_gmt")
+          total=$(grep -i '^x-wp-total:' "$headers" | tr -dc '0-9')
+          latest=$(echo "$body" | jq -r '.[0] | "\(.id)@\(.modified_gmt)"')
+          version="$total:$latest"
+          live=$(curl -sf "$LIVE_SITE/wp-sync.json" | jq -r '.version // empty' || true)
+          echo "WordPress: $version  Live: ${live:-none}"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [ "${{ github.event_name }}" = "schedule" ] && [ "$version" = "$live" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No WordPress changes since the last deploy; skipping."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.wp.outputs.changed == 'true'
+        uses: actions/checkout@v4
+      - if: steps.wp.outputs.changed == 'true'
+        uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: npm
-      - run: npm ci
+      - if: steps.wp.outputs.changed == 'true'
+        run: npm ci
       - name: Generate sitemap and build website
-        run: npm run build
+        if: steps.wp.outputs.changed == 'true'
+        run: |
+          npm run build
+          jq -n --arg v '${{ steps.wp.outputs.version }}' --arg t "$(date -u +%FT%TZ)" '{version:$v, deployedAt:$t}' > dist/wp-sync.json
         env:
           VITE_WORDPRESS_VERSION: 'true'
-          VITE_WP_API_URL: https://palegoldenrod-finch-836401.hostingersite.com/wp-json/wp/v2
+          VITE_WP_API_URL: ${{ env.WP_API }}
           VITE_WP_DORM_CATEGORY_ID: '2'
       - name: Publish to Firebase Hosting
+        if: steps.wp.outputs.changed == 'true'
         uses: FirebaseExtended/action-hosting-deploy@v0
         with:
           repoToken: ${{ secrets.GITHUB_TOKEN }}
