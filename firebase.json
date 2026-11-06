@@ -49,6 +49,16 @@
     "cleanUrls": true,
     "redirects": [
       {
+        "source": "/old-index",
+        "destination": "/",
+        "type": 301
+      },
+      {
+        "source": "/old-index/",
+        "destination": "/",
+        "type": 301
+      },
+      {
         "source": "/外勞懷孕-僱主責任-產假",
         "destination": "/posts/%E5%A4%96%E5%8B%9E%E6%87%B7%E5%AD%95-%E5%83%B1%E4%B8%BB%E8%B2%AC%E4%BB%BB-%E7%94%A2%E5%81%87",
         "type": 301
