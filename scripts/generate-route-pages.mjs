@@ -21,6 +21,29 @@ const metadata = new Map();
 const articleList = [];
 const dormList = [];
 const redirects = [];
+// Full records for the static JSON files React reads instead of the WordPress API.
+const articleRecords = new Map();
+const dormRecords = new Map();
+const articlesPerPage = 12;
+
+/** Write one JSON file under dist/data. */
+async function writeData(file, data) {
+  const target = join('dist', 'data', file);
+  await mkdir(dirname(target), {recursive: true});
+  await writeFile(target, JSON.stringify(data));
+}
+
+/** Publish articles and dormitories as static files so visitors never wait for the CMS. */
+async function writeContentData(sortedArticles, sortedDorms) {
+  const totalPages = Math.max(1, Math.ceil(sortedArticles.length / articlesPerPage));
+  for (let page = 1; page <= totalPages; page += 1) {
+    await writeData(`posts/page-${page}.json`, {posts: sortedArticles.slice((page - 1) * articlesPerPage, page * articlesPerPage), totalPages});
+  }
+  for (const [slug, record] of articleRecords) await writeData(`posts/${slug}.json`, record);
+  await writeData('dorms.json', sortedDorms);
+  for (const [slug, record] of dormRecords) await writeData(`dorms/${slug}.json`, record);
+  return totalPages;
+}
 
 /** Build initial HTML metadata and permanent redirects for the published routes. */
 async function generateRoutes() {
@@ -40,6 +63,7 @@ async function generateRoutes() {
         const record = {
           id: post.id, slug: post.slug, date: post.date, title: post.title, excerpt: post.excerpt, content: post.content,
           featured_media: post.featured_media, yoast_head_json: post.yoast_head_json, hkexl_seo: post.hkexl_seo,
+          hkexl_sitemap_index: post.hkexl_sitemap_index, hkexl_legacy_featured_image: post.hkexl_legacy_featured_image,
           hkexl_featured_image: media?.media_details?.sizes?.medium_large?.source_url || media?.source_url || '',
         };
         metadata.set(path, {
@@ -52,6 +76,7 @@ async function generateRoutes() {
         const {yoast_head_json, hkexl_seo, ...card} = record;
         if (dorm) dormList.push(card);
         else articleList.push({...card, content: {rendered: ''}});
+        (dorm ? dormRecords : articleRecords).set(slug, record);
         if (!dorm) {
           redirects.push({source:`/${slug}`,destination:encodeURI(path),type:301});
           redirects.push({source:`/${slug}/`,destination:encodeURI(path),type:301});
@@ -67,9 +92,12 @@ async function generateRoutes() {
   redirects.push(...oldCollections);
   const template = await readFile('dist/index.html', 'utf8');
   const byDate = (a, b) => a.date.localeCompare(b.date);
+  const sortedArticles = [...articleList].sort(byDate).reverse();
+  const sortedDorms = [...dormList].sort(byDate);
+  const totalPages = config.VITE_WORDPRESS_VERSION === 'true' ? await writeContentData(sortedArticles, sortedDorms) : 1;
   const lists = {
-    '/info': {kind: 'posts', posts: [...articleList].sort(byDate).reverse().slice(0, 12)},
-    '/dorms': {kind: 'dorms', posts: [...dormList].sort(byDate)},
+    '/info': {kind: 'posts', posts: sortedArticles.slice(0, articlesPerPage), totalPages},
+    '/dorms': {kind: 'dorms', posts: sortedDorms},
   };
   for (const path of paths) {
     const data = metadata.get(path) || {title:titles[path],description:'香港特快外勞提供香港外勞申請、招聘、簽證及住宿安排服務。',initial:lists[path]};
@@ -94,6 +122,7 @@ async function generateRoutes() {
   await writeFile('firebase.json', JSON.stringify(firebase, null, 2) + '\n');
   await writeFile('dist/404.html', '<!doctype html><html lang="zh-Hant"><meta charset="utf-8"><meta name="robots" content="noindex"><title>找不到網頁｜香港特快外勞</title><h1>找不到網頁</h1><p>網址可能已更改或頁面已移除。</p><a href="/">返回首頁</a></html>');
   console.log(`Generated initial canonical metadata for ${paths.length} routes and ${redirects.length} redirect rules.`);
+  console.log(`Generated static content for ${articleRecords.size} articles and ${dormRecords.size} dormitories.`);
 }
 
 await generateRoutes();

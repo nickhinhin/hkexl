@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
   BadgeCheck,
@@ -530,7 +530,63 @@ function initialList(kind) {
   return initialRecord?.kind === kind ? initialRecord.posts : null;
 }
 
-function useWordPressCategoryPosts(categorySlug) {
+// The Firebase build reads articles and dormitories from JSON files generated from WordPress on every
+// deploy, so visitors never call the CMS. The WordPress theme build keeps reading the REST API live.
+const staticContentEnabled = wordpressEnabled && !runtimeConfig.apiUrl;
+const staticData = new Map();
+const staticPath = (file) => `${import.meta.env.BASE_URL}data/${file}`;
+const slugFile = (slug) => {
+  let decoded = slug;
+  try { decoded = decodeURIComponent(slug); } catch { /* Keep malformed slugs; the request returns not found. */ }
+  return `${encodeURIComponent(decoded)}.json`;
+};
+
+/** Load one generated JSON file once per visit and reuse it on later navigation; 404 means not found. */
+function useStaticJson(path, initial) {
+  const [state, setState] = useState({ path: null, error: '' });
+  if (initial !== undefined && !staticData.has(path)) staticData.set(path, initial);
+  const known = staticData.has(path);
+  useEffect(() => {
+    if (staticData.has(path)) return undefined;
+    let active = true;
+    fetch(path)
+      .then((response) => {
+        if (response.status === 404) return null;
+        if (!response.ok) throw new Error(`網站內容 ${response.status}`);
+        return response.json();
+      })
+      .then((data) => { staticData.set(path, data); if (active) setState({ path, error: '' }); })
+      .catch((error) => { if (active) setState({ path, error: error.message }); });
+    return () => { active = false; };
+  }, [path]);
+  if (known) return { data: staticData.get(path), loading: false, error: '' };
+  return { data: null, loading: state.path !== path, error: state.path === path ? state.error : '' };
+}
+
+function useStaticCategoryPosts() {
+  const { data, loading, error } = useStaticJson(staticPath('dorms.json'), initialList('dorms') ?? undefined);
+  return { posts: data || [], categoryId: null, loading, error };
+}
+
+function useStaticDormPost(slug) {
+  const { data, loading, error } = useStaticJson(staticPath(`dorms/${slugFile(slug)}`), initialPost('dorm', slug) ?? undefined);
+  return { post: data, loading, error };
+}
+
+function useStaticPosts(page = 1) {
+  const embedded = page === 1 && initialList('posts') ? { posts: initialList('posts'), totalPages: initialRecord.totalPages || 1 } : undefined;
+  const { data, loading, error } = useStaticJson(staticPath(`posts/page-${page}.json`), embedded);
+  const posts = useMemo(() => (data?.posts || []).map(normalizeWpPost), [data]);
+  return { posts, loading, error, totalPages: data?.totalPages || 1 };
+}
+
+function useStaticPost(slug) {
+  const { data, loading, error } = useStaticJson(staticPath(`posts/${slugFile(slug)}`), initialPost('post', slug) ?? undefined);
+  const post = useMemo(() => (data ? normalizeWpPost(data) : null), [data]);
+  return { post, loading, error };
+}
+
+function useLiveCategoryPosts(categorySlug) {
   const initial = categorySlug === dormCategorySlug ? initialList('dorms') : null;
   const [state, setState] = useState({ posts: initial || [], categoryId: null, loading: wordpressEnabled && !initial, error: '' });
 
@@ -571,7 +627,7 @@ function useWordPressCategoryPosts(categorySlug) {
 }
 
 /** Fetch only the requested WordPress dormitory instead of downloading the complete directory. */
-function useWordPressDormPost(slug) {
+function useLiveDormPost(slug) {
   const initial = initialPost('dorm', slug);
   const [state, setState] = useState({ post: initial, loading: wordpressEnabled && !initial, error: '' });
   useEffect(() => {
@@ -624,7 +680,7 @@ function uniqueWorkers(workersList) {
 }
 
 /** Read a published article page; refresh on focus and once per minute. */
-function useWordPressPosts(page = 1) {
+function useLivePosts(page = 1) {
   const raw = page === 1 ? initialList('posts') : null;
   const initial = raw ? raw.map(normalizeWpPost) : null;
   const [state, setState] = useState({ posts: initial || [], loading: wordpressEnabled && !initial, error: '', totalPages: 1 });
@@ -653,7 +709,7 @@ function useWordPressPosts(page = 1) {
 }
 
 /** Fetch one published post by its decoded URL slug; never substitute another article. */
-function useWordPressPost(slug) {
+function useLivePost(slug) {
   const raw = initialPost('post', slug);
   const initial = raw ? normalizeWpPost(raw) : null;
   const [state, setState] = useState({ post: initial, loading: wordpressEnabled && !initial, error: '' });
@@ -671,6 +727,12 @@ function useWordPressPost(slug) {
   }, [slug]);
   return state;
 }
+
+// Chosen once per build, so each component always calls the same hook.
+const useWordPressCategoryPosts = staticContentEnabled ? useStaticCategoryPosts : useLiveCategoryPosts;
+const useWordPressDormPost = staticContentEnabled ? useStaticDormPost : useLiveDormPost;
+const useWordPressPosts = staticContentEnabled ? useStaticPosts : useLivePosts;
+const useWordPressPost = staticContentEnabled ? useStaticPost : useLivePost;
 
 /** Create or update one metadata tag in the document head. */
 function setMeta(selector, attr, key, value) {

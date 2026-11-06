@@ -7,7 +7,9 @@
 3. GitHub Actions 將整個現有網站建置結果部署到 Firebase Hosting，`https://hkexl.com/sitemap.xml` 及預先產生嘅文章／宿舍頁面因而更新。
 4. 後備檢查：工作流程每 3 小時（第 17 分鐘）比較 WordPress 已發佈文章數量及最新修改時間，同 `https://hkexl.com/wp-sync.json` 記錄嘅上次部署版本。有分別先會重新部署，冇分別就跳過。即使 webhook 失敗，最遲約 3 小時內都會自動補回。
 
-只在 WordPress 後台改字或圖片，網站本身會直接讀取最新內容；上述部署只係為咗更新 sitemap。Google Search Console 成功提交 sitemap 一次後會定期重讀。
+文章同宿舍：部署時會由 WordPress 生成 `dist/data/` 入面嘅 JSON 檔案（`posts/page-N.json`、`posts/<slug>.json`、`dorms.json`、`dorms/<slug>.json`），訪客瀏覽器只會讀取 hkexl.com 上面嘅呢啲檔案，唔會直接連去 WordPress。同一次瀏覽入面，已經睇過嘅文章會記住，唔會再次載入。所以喺 WordPress 修改文章或宿舍之後，要等自動部署完成（通常 2–3 分鐘）先會喺網站出現。
+
+頁面文字、選單及網站設定仍然會即時向 WordPress 讀取，唔使部署。WordPress 主題版本（`wordpress/hkexl-theme`）亦繼續即時讀取 WordPress。Google Search Console 成功提交 sitemap 一次後會定期重讀。
 
 ## 一次性設定
 

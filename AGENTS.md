@@ -24,7 +24,7 @@ When the user writes `[wpweb]` followed by a Figma URL, build and deliver the co
 - Avoid duplicate posts and pages. Update matching records in place so their IDs, slugs, publication status, and SEO metadata remain stable.
 - Ensure media uses working WordPress or deployed production URLs. Verify every visible image and video after migration.
 - A single detail page must request only its own WordPress record. Directory pages may request the collection, but must use compact REST fields and avoid unnecessary category or embed requests.
-- Refresh WordPress data on navigation or focus as appropriate so published edits reach the live site without showing local substitutes.
+- On the Firebase site, generate article and dormitory data from WordPress as static JSON on every deploy and read only those files; never call the WordPress API for them from the browser, and keep already-loaded records in memory. WordPress post changes trigger an automatic deploy (webhook plus a 3-hourly catch-up check). Pages, menus and site settings still load live from WordPress.
 
 ### SEO and analytics
 
