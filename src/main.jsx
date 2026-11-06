@@ -245,6 +245,8 @@ function wordpressContent(html = '') {
 /** Resolve original company media to compressed local assets; preserve WordPress uploads. */
 function imageSrc(src = '') {
   src = wordpressMediaSrc(src);
+  // Site-root paths are WordPress media copied to Firebase at build time (/media/…).
+  if (src.startsWith('/')) return src;
   if (!src.startsWith('http')) return `${A}${encodeURIComponent(src)}`;
   if (src.startsWith(U)) {
     const filename = src.split('/').pop().replace(/\.[^.]+$/, '.webp');

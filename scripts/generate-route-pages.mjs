@@ -1,6 +1,7 @@
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { loadEnv } from 'vite';
+import { localizeMedia, mirroredCount } from './mirror-media.mjs';
 
 const config = loadEnv('', process.cwd(), 'VITE_');
 const origin = 'https://hkexl.com';
@@ -60,16 +61,18 @@ async function generateRoutes() {
         const dorm = post.categories.includes(Number(config.VITE_WP_DORM_CATEGORY_ID));
         const path = `/${dorm ? 'living' : 'posts'}/${slug}`;
         const media = post._embedded?.['wp:featuredmedia']?.[0];
-        const record = {
+        const wpRecord = {
           id: post.id, slug: post.slug, date: post.date, title: post.title, excerpt: post.excerpt, content: post.content,
           featured_media: post.featured_media, yoast_head_json: post.yoast_head_json, hkexl_seo: post.hkexl_seo,
           hkexl_sitemap_index: post.hkexl_sitemap_index, hkexl_legacy_featured_image: post.hkexl_legacy_featured_image,
           hkexl_featured_image: media?.media_details?.sizes?.medium_large?.source_url || media?.source_url || '',
         };
+        // Only the fields we publish are localized, so unused image sizes are never downloaded.
+        const record = await localizeMedia(wpRecord, {wordpressOrigin: new URL(config.VITE_WP_API_URL).origin, publicOrigin: origin});
         metadata.set(path, {
           title: plain(post.title.rendered),
           description: plain(post.excerpt.rendered).slice(0, 180),
-          content: staticContent(post.content.rendered),
+          content: staticContent(record.content.rendered),
           initial: {kind: dorm ? 'dorm' : 'post', post: record},
         });
         // List cards only need the title, excerpt, image and (for dorm fields) content.
@@ -122,7 +125,7 @@ async function generateRoutes() {
   await writeFile('firebase.json', JSON.stringify(firebase, null, 2) + '\n');
   await writeFile('dist/404.html', '<!doctype html><html lang="zh-Hant"><meta charset="utf-8"><meta name="robots" content="noindex"><title>找不到網頁｜香港特快外勞</title><h1>找不到網頁</h1><p>網址可能已更改或頁面已移除。</p><a href="/">返回首頁</a></html>');
   console.log(`Generated initial canonical metadata for ${paths.length} routes and ${redirects.length} redirect rules.`);
-  console.log(`Generated static content for ${articleRecords.size} articles and ${dormRecords.size} dormitories.`);
+  console.log(`Generated static content for ${articleRecords.size} articles and ${dormRecords.size} dormitories, with ${mirroredCount()} media files copied to /media.`);
 }
 
 await generateRoutes();

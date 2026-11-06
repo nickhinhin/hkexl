@@ -9,6 +9,8 @@
 
 文章同宿舍：部署時會由 WordPress 生成 `dist/data/` 入面嘅 JSON 檔案（`posts/page-N.json`、`posts/<slug>.json`、`dorms.json`、`dorms/<slug>.json`），訪客瀏覽器只會讀取 hkexl.com 上面嘅呢啲檔案，唔會直接連去 WordPress。同一次瀏覽入面，已經睇過嘅文章會記住，唔會再次載入。所以喺 WordPress 修改文章或宿舍之後，要等自動部署完成（通常 2–3 分鐘）先會喺網站出現。
 
+文章同宿舍用到嘅 WordPress 圖片同影片，部署時亦會複製到 `https://hkexl.com/media/`（`scripts/mirror-media.mjs`）。圖片會轉做 WebP，最闊 1200px，質素 80。影片就原檔複製。因為 Hostinger 主機封鎖 Googlebot，咁做 Google 先睇到圖片。已轉換嘅檔案會喺 GitHub Actions 快取，只有新上傳或者替換咗嘅檔案先會重新下載。
+
 頁面文字、選單及網站設定仍然會即時向 WordPress 讀取，唔使部署。WordPress 主題版本（`wordpress/hkexl-theme`）亦繼續即時讀取 WordPress。Google Search Console 成功提交 sitemap 一次後會定期重讀。
 
 ## 一次性設定

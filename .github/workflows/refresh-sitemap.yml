@@ -52,6 +52,13 @@ jobs:
           cache: npm
       - if: steps.wp.outputs.changed == 'true'
         run: npm ci
+      # WebP copies of WordPress images; only new or replaced uploads are downloaded again.
+      - if: steps.wp.outputs.changed == 'true'
+        uses: actions/cache@v4
+        with:
+          path: .media-cache
+          key: hkexl-media-${{ github.run_id }}
+          restore-keys: hkexl-media-
       - name: Generate sitemap and build website
         if: steps.wp.outputs.changed == 'true'
         run: |
