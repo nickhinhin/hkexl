@@ -2,7 +2,7 @@
 /**
  * Plugin Name: HKEXL Headless SEO & Tracking Bridge
  * Description: Shares Yoast SEO, Site Kit, and GTM4WP settings with the Firebase website while keeping this WordPress frontend out of search results.
- * Version: 1.0.1
+ * Version: 1.0.2
  * Author: HKEXL
  */
 
@@ -24,11 +24,23 @@ function hkexl_bridge_plugin_active($fragment) {
     return false;
 }
 
-/** Extract valid public tracking IDs from a plugin option without exposing other settings. */
-function hkexl_bridge_extract_ids($value, $pattern) {
-    $encoded = wp_json_encode($value);
-    preg_match_all($pattern, (string) $encoded, $matches);
-    return array_values(array_unique($matches[0] ?? array()));
+/**
+ * Read tracking IDs from the named option fields only. Scanning the whole option matched setting
+ * names such as "gtm-no-container" and loaded them as fake GTM containers.
+ */
+function hkexl_bridge_extract_ids($options, $keys, $pattern) {
+    $ids = array();
+    foreach ($keys as $key) {
+        if (!isset($options[$key]) || !is_scalar($options[$key])) {
+            continue;
+        }
+        foreach (preg_split('/[\s,]+/', strtoupper((string) $options[$key])) as $candidate) {
+            if (preg_match($pattern, $candidate)) {
+                $ids[] = $candidate;
+            }
+        }
+    }
+    return array_values(array_unique($ids));
 }
 
 /** Read one non-empty option value from a list of possible plugin field names. */
@@ -63,13 +75,13 @@ function hkexl_bridge_site_config() {
     $gtm_ids = array();
     $ga_ids = array();
     if ($gtm4wp_active) {
-        $gtm_ids = array_merge($gtm_ids, hkexl_bridge_extract_ids($gtm4wp, '/GTM-[A-Z0-9]+/i'));
+        $gtm_ids = array_merge($gtm_ids, hkexl_bridge_extract_ids($gtm4wp, array('gtm-code'), '/^GTM-[A-Z0-9]+$/'));
     }
     if ($sitekit_active && hkexl_bridge_sitekit_snippet_enabled($sitekit_gtm)) {
-        $gtm_ids = array_merge($gtm_ids, hkexl_bridge_extract_ids($sitekit_gtm, '/GTM-[A-Z0-9]+/i'));
+        $gtm_ids = array_merge($gtm_ids, hkexl_bridge_extract_ids($sitekit_gtm, array('containerID'), '/^GTM-[A-Z0-9]+$/'));
     }
     if ($sitekit_active && hkexl_bridge_sitekit_snippet_enabled($sitekit_ga)) {
-        $ga_ids = array_merge($ga_ids, hkexl_bridge_extract_ids($sitekit_ga, '/G-[A-Z0-9]+/i'));
+        $ga_ids = array_merge($ga_ids, hkexl_bridge_extract_ids($sitekit_ga, array('measurementID'), '/^G-[A-Z0-9]+$/'));
     }
 
     $response = rest_ensure_response(array(

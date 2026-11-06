@@ -795,28 +795,28 @@ function Seo({ title, description, image, robots, type = 'website', twitterCard 
   return null;
 }
 
-/** Load tracking IDs configured in Site Kit or GTM4WP, without inserting duplicates. */
-function CmsTracking({ config }) {
-  useEffect(() => {
-    document.querySelectorAll('[data-hkexl-tracking]').forEach((node) => node.remove());
-    if (!config?.tracking) return;
+// Real container and measurement IDs always contain a digit; this also rejects setting names
+// (GTM-NO, GTM-CODE, …) that older versions of the WordPress bridge plugin reported as IDs.
+const validTrackingIds = (ids, prefix) => [...new Set((ids || []).map((id) => String(id).toUpperCase()))]
+  .filter((id) => new RegExp(`^${prefix}-(?=[A-Z0-9]*\\d)[A-Z0-9]{4,}$`).test(id));
+// A tag cannot be unloaded once it runs, so each ID is inserted at most once per visit.
+const loadedTrackingIds = new Set();
 
-    const gtmIds = [...new Set(config.tracking.gtmContainerIds || [])];
-    gtmIds.forEach((id) => {
+/** Load tracking IDs configured in Site Kit or GTM4WP, once each, however often the settings refresh. */
+function CmsTracking({ config }) {
+  const gtmKey = validTrackingIds(config?.tracking?.gtmContainerIds, 'GTM').join(',');
+  const gaKey = validTrackingIds(config?.tracking?.gaMeasurementIds, 'G').join(',');
+  useEffect(() => {
+    const fresh = (ids) => ids.filter((id) => id && !loadedTrackingIds.has(id) && loadedTrackingIds.add(id));
+    fresh(gtmKey.split(',')).forEach((id) => {
       const script = document.createElement('script');
       script.dataset.hkexlTracking = 'gtm';
       script.text = `(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src='https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);})(window,document,'script','dataLayer','${id}');`;
       document.head.appendChild(script);
-      const frame = document.createElement('iframe');
-      frame.src = `https://www.googletagmanager.com/ns.html?id=${encodeURIComponent(id)}`;
-      frame.height = '0'; frame.width = '0'; frame.style.display = 'none'; frame.style.visibility = 'hidden';
-      const noscript = document.createElement('noscript');
-      noscript.dataset.hkexlTracking = 'gtm';
-      noscript.appendChild(frame);
-      document.body.prepend(noscript);
+      // No <noscript> iframe: this code only runs with JavaScript on, where that fallback just adds a request.
     });
 
-    [...new Set(config.tracking.gaMeasurementIds || [])].forEach((id) => {
+    fresh(gaKey.split(',')).forEach((id) => {
       const loader = document.createElement('script');
       loader.async = true;
       loader.src = `https://www.googletagmanager.com/gtag/js?id=${encodeURIComponent(id)}`;
@@ -827,8 +827,7 @@ function CmsTracking({ config }) {
       configScript.text = `window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','${id}');`;
       document.head.appendChild(configScript);
     });
-    return () => document.querySelectorAll('[data-hkexl-tracking]').forEach((node) => node.remove());
-  }, [config]);
+  }, [gtmKey, gaKey]);
   return null;
 }
 
